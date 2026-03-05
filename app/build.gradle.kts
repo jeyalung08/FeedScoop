@@ -1,4 +1,3 @@
-// FILE: app/build.gradle.kts  (Module :app)
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -41,7 +40,6 @@ android {
     buildFeatures { compose = true }
 
     composeOptions {
-        // Kotlin 1.9.23 requires Compose Compiler 1.5.11 — matches your existing setting
         kotlinCompilerExtensionVersion = "1.5.11"
     }
 
@@ -55,6 +53,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+
+    // ── AppCompat — provides Theme.AppCompat for XML themes ───────────
+    implementation(libs.androidx.appcompat)
 
     // ── Compose BOM ───────────────────────────────────────────────────
     implementation(platform(libs.androidx.compose.bom))
@@ -75,14 +76,11 @@ dependencies {
     kapt(libs.hilt.compiler)
 
     // ── Firebase BOM + Realtime Database ─────────────────────────────
-    // The BOM resolves all firebase library versions automatically.
-    // Do NOT add version numbers to individual firebase libs.
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.database.ktx)
     implementation(libs.firebase.analytics.ktx)
 
     // ── Coroutines ────────────────────────────────────────────────────
-    // Required for .await() extension on Firebase Tasks
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
 
@@ -94,5 +92,4 @@ dependencies {
     androidTestImplementation(libs.compose.ui.test.junit4)
 }
 
-// Required for Hilt to process annotations correctly
 kapt { correctErrorTypes = true }

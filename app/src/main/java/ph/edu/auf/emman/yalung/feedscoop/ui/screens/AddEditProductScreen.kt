@@ -1,4 +1,4 @@
-// File: ui/screens/AddEditProductScreen.kt
+// FILE: ui/screens/AddEditProductScreen.kt
 package ph.edu.auf.emman.yalung.feedscoop.ui.screens
 
 import androidx.compose.foundation.layout.*
@@ -32,7 +32,8 @@ private fun DecimalField(value: String, onValueChange: (String) -> Unit, label: 
         modifier = Modifier.fillMaxWidth()
     )
     if (value.isNotBlank() && value.toDoubleOrNull() == null) {
-        Text("Please enter a valid number", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+        Text("Please enter a valid number", color = Color.Red,
+            style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -41,29 +42,42 @@ private fun DecimalField(value: String, onValueChange: (String) -> Unit, label: 
 fun AddEditProductScreen(
     navController: NavController,
     productId: String = "",
+    // Injected from FeedScoopNavGraph — same instance as AvailableProductsScreen
     inventoryViewModel: InventoryViewModel = hiltViewModel()
 ) {
-    val products by inventoryViewModel.inventoryItems.collectAsState()
-    val existingProduct = remember(products, productId) { products.find { it.productId == productId } }
-    val isEditing = productId.isNotBlank()
+    val products     by inventoryViewModel.inventoryItems.collectAsState()
+    val saveComplete by inventoryViewModel.saveComplete.collectAsState()
+    val isEditing    = productId.isNotBlank()
+    val existingProduct = remember(products, productId) {
+        products.find { it.productId == productId }
+    }
 
-    var name         by remember { mutableStateOf(existingProduct?.name                        ?: "") }
-    var brand        by remember { mutableStateOf(existingProduct?.brand                       ?: "") }
-    var type         by remember { mutableStateOf(existingProduct?.type                        ?: "") }
-    var totalWeight  by remember { mutableStateOf(existingProduct?.totalWeight?.toString()     ?: "") }
-    var remainWeight by remember { mutableStateOf(existingProduct?.remainingWeight?.toString() ?: "") }
-    var pricePerKilo by remember { mutableStateOf(existingProduct?.pricePerKilo?.toString()    ?: "") }
+    var name         by remember { mutableStateOf("") }
+    var brand        by remember { mutableStateOf("") }
+    var type         by remember { mutableStateOf("") }
+    var totalWeight  by remember { mutableStateOf("") }
+    var remainWeight by remember { mutableStateOf("") }
+    var pricePerKilo by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
 
     LaunchedEffect(existingProduct) {
         existingProduct?.let {
-            name = it.name; brand = it.brand; type = it.type
-            totalWeight = it.totalWeight.toString()
+            name         = it.name
+            brand        = it.brand
+            type         = it.type
+            totalWeight  = it.totalWeight.toString()
             remainWeight = it.remainingWeight.toString()
             pricePerKilo = it.pricePerKilo.toString()
         }
     }
 
-    var errorMessage by remember { mutableStateOf("") }
+    // Navigate back only after Firebase write is done
+    LaunchedEffect(saveComplete) {
+        if (saveComplete) {
+            inventoryViewModel.resetSaveComplete()
+            navController.popBackStack()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -78,45 +92,63 @@ fun AddEditProductScreen(
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (errorMessage.isNotBlank())
+            if (errorMessage.isNotBlank()) {
                 Text(errorMessage, color = Color.Red, style = MaterialTheme.typography.bodySmall)
+            }
 
             OutlinedTextField(value = name, onValueChange = { name = it },
-                label = { Text("Product Name") }, modifier = Modifier.fillMaxWidth())
+                label = { Text("Product Name *") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = brand, onValueChange = { brand = it },
-                label = { Text("Brand") }, modifier = Modifier.fillMaxWidth())
+                label = { Text("Brand *") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = type, onValueChange = { type = it },
                 label = { Text("Type (e.g. Poultry, Swine)") }, modifier = Modifier.fillMaxWidth())
 
-            DecimalField(totalWeight,  { totalWeight  = it }, "Total Weight of Sack (kg)")
-            DecimalField(remainWeight, { remainWeight = it }, "Current / Remaining Weight (kg)")
-            DecimalField(pricePerKilo, { pricePerKilo = it }, "Price per Kilo")
+            DecimalField(totalWeight,  { totalWeight  = it }, "Total Weight of Sack (kg) *")
+            DecimalField(remainWeight, { remainWeight = it }, "Current / Remaining Weight (kg) *")
+            DecimalField(pricePerKilo, { pricePerKilo = it }, "Price per Kilo *")
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Button(
                 onClick = {
-                    val tw = totalWeight.toDoubleOrNull(); val rw = remainWeight.toDoubleOrNull()
+                    errorMessage = ""
+                    val tw  = totalWeight.toDoubleOrNull()
+                    val rw  = remainWeight.toDoubleOrNull()
                     val ppk = pricePerKilo.toDoubleOrNull()
-                    if (name.isBlank() || brand.isBlank() || tw == null || rw == null || ppk == null) {
-                        errorMessage = "Please fill in all required fields with valid numbers."
-                        return@Button
+                    when {
+                        name.isBlank()  -> errorMessage = "Product name is required."
+                        brand.isBlank() -> errorMessage = "Brand is required."
+                        tw == null      -> errorMessage = "Enter a valid total weight."
+                        rw == null      -> errorMessage = "Enter a valid remaining weight."
+                        ppk == null     -> errorMessage = "Enter a valid price."
+                        rw > tw         -> errorMessage = "Remaining weight cannot exceed total weight."
+                        else -> {
+                            val item = InventoryItem(
+                                productId       = if (isEditing) productId else "",
+                                name            = name.trim(),
+                                brand           = brand.trim(),
+                                type            = type.trim(),
+                                totalWeight     = tw,
+                                remainingWeight = rw,
+                                pricePerKilo    = ppk
+                            )
+                            if (isEditing) inventoryViewModel.updateProduct(item)
+                            else           inventoryViewModel.addProduct(item)
+                        }
                     }
-                    val item = InventoryItem(
-                        productId = if (isEditing) productId else "", name = name.trim(),
-                        brand = brand.trim(), type = type.trim(),
-                        totalWeight = tw, remainingWeight = rw, pricePerKilo = ppk
-                    )
-                    if (isEditing) inventoryViewModel.updateProduct(item) else inventoryViewModel.addProduct(item)
-                    navController.popBackStack()
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-            ) { Text(if (isEditing) "Save Changes" else "Add Product", color = Color.White) }
+            ) {
+                Text(if (isEditing) "Save Changes" else "Add Product", color = Color.White)
+            }
         }
     }
 }
