@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FILE: app/src/main/res/xml/file_provider_paths.xml -->
+<paths>
+    <!-- cache_path covers Context.cacheDir where CSV is written before sharing -->
+    <cache-path name="shared_files" path="." />
+    <external-cache-path name="external_cache" path="." />
+</paths>

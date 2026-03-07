@@ -1,4 +1,4 @@
-// File: ui/screens/OrdersHistoryScreen.kt
+// FILE: ui/screens/OrdersHistoryScreen.kt
 package ph.edu.auf.emman.yalung.feedscoop.ui.screens
 
 import androidx.compose.foundation.clickable
@@ -33,17 +33,15 @@ fun OrdersHistoryScreen(
 
     var startDateStr by remember { mutableStateOf(today) }
     var endDateStr   by remember { mutableStateOf(today) }
-    var filterMode   by remember { mutableStateOf("today") } // "today" | "range"
+    var filterMode   by remember { mutableStateOf("today") }
 
-    // Load today's orders by default
+    // Load today's orders on first open
     LaunchedEffect(Unit) {
         val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0);      set(Calendar.MILLISECOND, 0)
         }
-        val startOfDay = cal.timeInMillis
-        val endOfDay   = startOfDay + 24 * 60 * 60 * 1000 - 1
-        orderViewModel.loadOrdersByDateRange(startOfDay, endOfDay)
+        orderViewModel.loadOrdersByDateRange(cal.timeInMillis, cal.timeInMillis + 86_399_999L)
     }
 
     Column(
@@ -54,9 +52,8 @@ fun OrdersHistoryScreen(
     ) {
         Text("Orders History", style = MaterialTheme.typography.titleLarge, color = Color(0xFF2E7D32))
 
-        // ── Date filter row ───────────────────────────────────────────
+        // ── Filter chips ──────────────────────────────────────────
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Today button
             FilterChip(
                 selected = filterMode == "today",
                 onClick = {
@@ -65,12 +62,18 @@ fun OrdersHistoryScreen(
                         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
                         set(Calendar.SECOND, 0);      set(Calendar.MILLISECOND, 0)
                     }
-                    orderViewModel.loadOrdersByDateRange(cal.timeInMillis, cal.timeInMillis + 86_399_999L)
+                    orderViewModel.loadOrdersByDateRange(
+                        cal.timeInMillis,
+                        cal.timeInMillis + 86_399_999L
+                    )
                 },
                 label = { Text("Today") }
             )
-
-            // Range mode
+            FilterChip(
+                selected = filterMode == "all",
+                onClick = { filterMode = "all"; orderViewModel.loadAllOrders() },
+                label = { Text("All Time") }
+            )
             FilterChip(
                 selected = filterMode == "range",
                 onClick = { filterMode = "range" },
@@ -79,20 +82,19 @@ fun OrdersHistoryScreen(
         }
 
         if (filterMode == "range") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 OutlinedTextField(
-                    value = startDateStr,
-                    onValueChange = { startDateStr = it },
+                    value = startDateStr, onValueChange = { startDateStr = it },
                     label = { Text("Start (yyyy-MM-dd)") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
+                    modifier = Modifier.weight(1f), singleLine = true
                 )
                 OutlinedTextField(
-                    value = endDateStr,
-                    onValueChange = { endDateStr = it },
+                    value = endDateStr, onValueChange = { endDateStr = it },
                     label = { Text("End (yyyy-MM-dd)") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
+                    modifier = Modifier.weight(1f), singleLine = true
                 )
             }
             Button(
@@ -107,17 +109,54 @@ fun OrdersHistoryScreen(
             ) { Text("Apply", color = Color.White) }
         }
 
-        Divider()
+        HorizontalDivider()
 
-        // ── Orders list ───────────────────────────────────────────────
+        // ── Summary row ──────────────────────────────────────────
+        if (orders.isNotEmpty()) {
+            val totalRevenue = orders.sumOf { it.totalPrice }
+            val totalKilos   = orders.sumOf { it.kilosOrdered }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${orders.size}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF2E7D32))
+                        Text("Orders", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "${String.format("%.2f", totalKilos)} kg",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFF2E7D32)
+                        )
+                        Text("Total kg", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "₱${String.format("%.2f", totalRevenue)}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFF2E7D32)
+                        )
+                        Text("Revenue", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
+        // ── Orders list ──────────────────────────────────────────
         if (orders.isEmpty()) {
-            Text("No orders found for the selected period.")
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No orders found for the selected period.", color = Color.Gray)
+            }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Display oldest → newest (bottom to top means first order is shown first in list)
-                items(orders) { order ->
-                    ExpandableOrderCard(order)
-                }
+                items(orders) { order -> ExpandableOrderCard(order) }
             }
         }
     }
@@ -126,7 +165,11 @@ fun OrdersHistoryScreen(
 @Composable
 fun ExpandableOrderCard(order: Order) {
     var expanded by remember { mutableStateOf(false) }
-    val sdf = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
+    // FIX: show timestamp — was previously commented out
+    val dateStr = remember(order.timestamp) {
+        SimpleDateFormat("MMM dd, yyyy  hh:mm a", Locale.getDefault())
+            .format(Date(order.timestamp))
+    }
 
     Card(
         modifier = Modifier
@@ -141,11 +184,21 @@ fun ExpandableOrderCard(order: Order) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text("${order.productName} — ${order.brand}",
-                        style = MaterialTheme.typography.titleSmall)
-                    Text("${String.format("%.3f", order.kilosOrdered)} kg | ₱${String.format("%.2f", order.totalPrice)}",
-                        style = MaterialTheme.typography.bodySmall)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "${order.productName} — ${order.brand}",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        "${String.format("%.3f", order.kilosOrdered)} kg  |  ₱${String.format("%.2f", order.totalPrice)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    // FIX: timestamp now displayed
+                    Text(
+                        dateStr,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
                 }
                 Icon(
                     imageVector = if (expanded) Icons.Default.KeyboardArrowUp
@@ -156,17 +209,19 @@ fun ExpandableOrderCard(order: Order) {
 
             if (expanded) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Divider()
+                HorizontalDivider()
                 Spacer(modifier = Modifier.height(8.dp))
-                //Text("Date: ${order.date?.let { sdf.format(it) } ?: "—"}",
-                //    style = MaterialTheme.typography.bodySmall)
-                Text("Price per kg: ₱${order.pricePerKilo}",
-                    style = MaterialTheme.typography.bodySmall)
-                Text("Kilos Ordered: ${String.format("%.3f", order.kilosOrdered)} kg",
-                    style = MaterialTheme.typography.bodySmall)
-                Text("Total Price: ₱${String.format("%.2f", order.totalPrice)}",
+                Text("Date: $dateStr", style = MaterialTheme.typography.bodySmall)
+                Text("Price per kg: ₱${order.pricePerKilo}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Kilos Ordered: ${String.format("%.3f", order.kilosOrdered)} kg",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "Total Price: ₱${String.format("%.2f", order.totalPrice)}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF2E7D32))
+                    color = Color(0xFF2E7D32)
+                )
             }
         }
     }

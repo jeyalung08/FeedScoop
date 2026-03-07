@@ -23,4 +23,8 @@ object AppModule {
     @Singleton
     fun provideOrderRepository(database: FirebaseDatabase): OrderRepository =
         OrderRepository(database)
+
+    // DeviceViewModel now also uses FirebaseDatabase (injected via @Inject constructor)
+    // No manual provider needed — Hilt handles it automatically since
+    // DeviceViewModel is @HiltViewModel and FirebaseDatabase is @Singleton above.
 }

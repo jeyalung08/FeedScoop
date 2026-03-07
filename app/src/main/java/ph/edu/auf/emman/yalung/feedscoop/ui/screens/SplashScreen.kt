@@ -1,4 +1,4 @@
-// File: ui/screens/SplashScreen.kt
+// FILE: ui/screens/SplashScreen.kt
 package ph.edu.auf.emman.yalung.feedscoop.ui.screens
 
 import androidx.compose.foundation.background
@@ -15,19 +15,18 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(navController: NavController) {
-    // Launch a coroutine for delay
     LaunchedEffect(key1 = true) {
-        delay(2000L) // 2 seconds splash
+        delay(2000L)
         navController.navigate("dashboard") {
-            popUpTo("splash_screen") { inclusive = true } // Remove splash from backstack
+            // FIX: was "splash_screen" — route is actually "splash"
+            popUpTo("splash") { inclusive = true }
         }
     }
 
-    // Splash UI
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF2E7D32)), // Dark green
+            .background(Color(0xFF2E7D32)),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

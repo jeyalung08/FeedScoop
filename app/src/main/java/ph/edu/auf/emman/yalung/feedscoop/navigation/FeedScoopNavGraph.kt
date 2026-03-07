@@ -10,17 +10,21 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import ph.edu.auf.emman.yalung.feedscoop.ui.screens.*
+import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.DeviceViewModel
 import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.InventoryViewModel
 import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.OrderViewModel
 
 @Composable
 fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()) {
 
-    // These ViewModels are created once at the NavGraph level and shared across
-    // all screens that need them. This keeps the Firebase listener alive the
-    // entire time the user is in the app, so adds/edits are immediately visible.
+    // All ViewModels created ONCE here and passed explicitly to every screen.
+    // This guarantees:
+    //   - One Firebase listener for inventory (InventoryViewModel)
+    //   - One Firebase listener for orders (OrderViewModel)
+    //   - One BLE/device state shared across Device, Calibration, and Weighing (DeviceViewModel)
     val inventoryViewModel: InventoryViewModel = hiltViewModel()
-    val orderViewModel: OrderViewModel = hiltViewModel()
+    val orderViewModel: OrderViewModel         = hiltViewModel()
+    val deviceViewModel: DeviceViewModel       = hiltViewModel()
 
     NavHost(navController = navController, startDestination = "splash") {
 
@@ -32,7 +36,7 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
             DashboardScreen(navController)
         }
 
-        // ── Available Products ──────────────────────────────────────
+        // ── Products ────────────────────────────────────────────────
         composable("available_products") {
             AvailableProductsScreen(navController, inventoryViewModel)
         }
@@ -47,8 +51,8 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
         ) { backStackEntry ->
             val productId = backStackEntry.arguments?.getString("productId") ?: ""
             AddEditProductScreen(
-                navController     = navController,
-                productId         = productId,
+                navController      = navController,
+                productId          = productId,
                 inventoryViewModel = inventoryViewModel
             )
         }
@@ -66,7 +70,8 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
             val productId    = backStackEntry.arguments?.getString("productId")    ?: ""
             val productName  = backStackEntry.arguments?.getString("productName")  ?: ""
             val brand        = backStackEntry.arguments?.getString("brand")        ?: ""
-            val pricePerKilo = backStackEntry.arguments?.getString("pricePerKilo")?.toDoubleOrNull() ?: 0.0
+            val pricePerKilo = backStackEntry.arguments?.getString("pricePerKilo")
+                ?.toDoubleOrNull() ?: 0.0
             RealTimeWeighingScreen(
                 navController      = navController,
                 productId          = productId,
@@ -74,7 +79,8 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
                 brand              = brand,
                 pricePerKilo       = pricePerKilo,
                 orderViewModel     = orderViewModel,
-                inventoryViewModel = inventoryViewModel
+                deviceViewModel    = deviceViewModel,      // FIX: shared instance
+                inventoryViewModel = inventoryViewModel    // FIX: shared instance
             )
         }
 
@@ -102,11 +108,11 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
 
         // ── Device / Settings ───────────────────────────────────────
         composable("device_connection") {
-            DeviceConnectionScreen(navController)
+            DeviceConnectionScreen(navController, deviceViewModel)  // FIX: shared instance
         }
 
         composable("calibration") {
-            CalibrationScreen(navController)
+            CalibrationScreen(navController, deviceViewModel)        // FIX: shared instance
         }
 
         composable("settings") {
@@ -114,7 +120,7 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
         }
 
         composable("reports_export") {
-            ReportsExportScreen(navController)
+            ReportsExportScreen(navController, orderViewModel)
         }
 
         composable("error_offline") {

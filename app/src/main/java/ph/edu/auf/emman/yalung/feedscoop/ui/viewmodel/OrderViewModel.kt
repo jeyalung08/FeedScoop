@@ -1,4 +1,4 @@
-// File: ui/viewmodel/OrderViewModel.kt
+// FILE: ui/viewmodel/OrderViewModel.kt
 package ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
@@ -22,12 +22,11 @@ class OrderViewModel @Inject constructor(
     private val _currentOrders = MutableStateFlow<List<Order>>(emptyList())
     val currentOrders: StateFlow<List<Order>> = _currentOrders.asStateFlow()
 
-    // Orders loaded from Firestore (history / analytics)
+    // Orders loaded from Firebase (history / analytics)
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders.asStateFlow()
 
     init {
-        // Observe all orders for analytics by default
         viewModelScope.launch {
             repository.getAllOrders().collectLatest { list ->
                 _orders.value = list
@@ -35,24 +34,20 @@ class OrderViewModel @Inject constructor(
         }
     }
 
-    /** Add order to current session and persist to Firestore */
+    /** Add order to session and persist to Firebase — fire-and-forget write */
     fun addOrder(order: Order, inventoryViewModel: InventoryViewModel? = null) {
-        viewModelScope.launch {
-            val saved = order.copy(id = repository.addOrder(order))
-            _currentOrders.value = _currentOrders.value + saved
-            // Deduct inventory
-            inventoryViewModel?.deductWeight(order.productId, order.kilosOrdered)
-        }
+        val key   = repository.addOrder(order)           // non-suspend, instant
+        val saved = order.copy(id = key)
+        _currentOrders.value = _currentOrders.value + saved
+        inventoryViewModel?.deductWeight(order.productId, order.kilosOrdered)
     }
 
-    /** Load orders within a date range into the history/analytics list */
     fun loadOrdersByDateRange(startMillis: Long, endMillis: Long) {
         viewModelScope.launch {
             _orders.value = repository.getOrdersByDateRange(startMillis, endMillis)
         }
     }
 
-    /** Reset to all orders (for analytics reset button) */
     fun loadAllOrders() {
         viewModelScope.launch {
             repository.getAllOrders().collectLatest { list ->
@@ -62,14 +57,10 @@ class OrderViewModel @Inject constructor(
     }
 
     fun clearCurrentOrders() {
-        viewModelScope.launch {
-            _currentOrders.value = emptyList()
-        }
+        _currentOrders.value = emptyList()
     }
 
     fun removeOrder(order: Order) {
-        viewModelScope.launch {
-            _currentOrders.value = _currentOrders.value.filter { it != order }
-        }
+        _currentOrders.value = _currentOrders.value.filter { it != order }
     }
 }

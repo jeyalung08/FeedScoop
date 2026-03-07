@@ -1,6 +1,7 @@
 // FILE: data/repository/OrderRepository.kt
 package ph.edu.auf.emman.yalung.feedscoop.data.repository
 
+import android.util.Log
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
@@ -13,23 +14,52 @@ import ph.edu.auf.emman.yalung.feedscoop.data.model.Order
 import javax.inject.Inject
 import javax.inject.Singleton
 
+private const val TAG = "OrderRepo"
+
 @Singleton
 class OrderRepository @Inject constructor(
     private val database: FirebaseDatabase
 ) {
-    // All orders live under /orders/<orderId>
     private val ref = database.getReference("orders")
 
-    /** Real-time stream of ALL orders, sorted oldest → newest by timestamp. */
+    // Manual field mapping — same approach as ProductRepository to avoid
+    // reflection deserialization failures (Long vs Double, missing fields, etc.)
+    private fun DataSnapshot.toOrder(): Order? {
+        val id           = key ?: return null
+        val productId    = child("productId").getValue(String::class.java) ?: ""
+        val productName  = child("productName").getValue(String::class.java) ?: ""
+        val brand        = child("brand").getValue(String::class.java) ?: ""
+        val kilosOrdered = child("kilosOrdered").getValue(Double::class.java) ?: 0.0
+        val pricePerKilo = child("pricePerKilo").getValue(Double::class.java) ?: 0.0
+        val totalPrice   = child("totalPrice").getValue(Double::class.java) ?: 0.0
+        // Firebase stores Long — coerce to Long safely
+        val timestamp    = child("timestamp").getValue(Long::class.java)
+            ?: child("timestamp").getValue(Double::class.java)?.toLong()
+            ?: System.currentTimeMillis()
+        return Order(
+            id           = id,
+            productId    = productId,
+            productName  = productName,
+            brand        = brand,
+            kilosOrdered = kilosOrdered,
+            pricePerKilo = pricePerKilo,
+            totalPrice   = totalPrice,
+            timestamp    = timestamp
+        )
+    }
+
+    /** Real-time stream of ALL orders, sorted oldest → newest. */
     fun getAllOrders(): Flow<List<Order>> = callbackFlow {
+        Log.d(TAG, "getAllOrders: attaching listener")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val orders = snapshot.children.mapNotNull { child ->
-                    child.getValue(Order::class.java)?.copy(id = child.key ?: "")
-                }.sortedBy { it.timestamp }
+                Log.d(TAG, "onDataChange: children=${snapshot.childrenCount}")
+                val orders = snapshot.children.mapNotNull { it.toOrder() }
+                    .sortedBy { it.timestamp }
                 trySend(orders)
             }
             override fun onCancelled(error: DatabaseError) {
+                Log.e(TAG, "onCancelled: ${error.message}")
                 close(error.toException())
             }
         }
@@ -37,11 +67,7 @@ class OrderRepository @Inject constructor(
         awaitClose { ref.removeEventListener(listener) }
     }
 
-    /**
-     * One-shot fetch of orders within a timestamp range.
-     * Uses orderByChild("timestamp") which requires the index rule in Firebase console:
-     *   "orders": { ".indexOn": ["timestamp"] }
-     */
+    /** One-shot fetch filtered by timestamp range. Requires .indexOn ["timestamp"] in rules. */
     suspend fun getOrdersByDateRange(start: Long, end: Long): List<Order> {
         val snapshot = ref
             .orderByChild("timestamp")
@@ -49,22 +75,29 @@ class OrderRepository @Inject constructor(
             .endAt(end.toDouble())
             .get()
             .await()
-        return snapshot.children.mapNotNull { child ->
-            child.getValue(Order::class.java)?.copy(id = child.key ?: "")
-        }.sortedBy { it.timestamp }
+        return snapshot.children.mapNotNull { it.toOrder() }
+            .sortedBy { it.timestamp }
     }
 
-    /** Push a new order and return its auto-generated key. */
-    suspend fun addOrder(order: Order): String {
+    /** Write a new order as a plain map — no reflection, no type ambiguity. */
+    fun addOrder(order: Order): String {
         val newRef = ref.push()
-        val key = newRef.key ?: ""
-        // Always stamp with current time — Order.timestamp default is fine
-        // but we ensure it's set on save
-        val toSave = order.copy(
-            id = key,
-            timestamp = System.currentTimeMillis()
+        val key    = newRef.key ?: ""
+        val now    = System.currentTimeMillis()
+        val map    = mapOf(
+            "id"           to key,
+            "productId"    to order.productId,
+            "productName"  to order.productName,
+            "brand"        to order.brand,
+            "kilosOrdered" to order.kilosOrdered,
+            "pricePerKilo" to order.pricePerKilo,
+            "totalPrice"   to order.totalPrice,
+            "timestamp"    to now
         )
-        newRef.setValue(toSave).await()
+        newRef.setValue(map) { error, _ ->
+            if (error != null) Log.e(TAG, "addOrder FAILED: ${error.message}")
+            else Log.d(TAG, "addOrder SUCCESS key=$key")
+        }
         return key
     }
 }
