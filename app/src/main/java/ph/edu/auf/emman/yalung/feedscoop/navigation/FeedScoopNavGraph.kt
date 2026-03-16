@@ -17,11 +17,7 @@ import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.OrderViewModel
 @Composable
 fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()) {
 
-    // All ViewModels created ONCE here and passed explicitly to every screen.
-    // This guarantees:
-    //   - One Firebase listener for inventory (InventoryViewModel)
-    //   - One Firebase listener for orders (OrderViewModel)
-    //   - One BLE/device state shared across Device, Calibration, and Weighing (DeviceViewModel)
+    // All ViewModels created ONCE and shared across all screens
     val inventoryViewModel: InventoryViewModel = hiltViewModel()
     val orderViewModel: OrderViewModel         = hiltViewModel()
     val deviceViewModel: DeviceViewModel       = hiltViewModel()
@@ -33,7 +29,8 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
         }
 
         composable("dashboard") {
-            DashboardScreen(navController)
+            // Pass inventoryViewModel so dashboard shows restock banners
+            DashboardScreen(navController, inventoryViewModel)
         }
 
         // ── Products ────────────────────────────────────────────────
@@ -44,9 +41,9 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
         composable(
             route = "add_edit_product?productId={productId}",
             arguments = listOf(navArgument("productId") {
-                type = NavType.StringType
+                type         = NavType.StringType
                 defaultValue = ""
-                nullable = true
+                nullable     = true
             })
         ) { backStackEntry ->
             val productId = backStackEntry.arguments?.getString("productId") ?: ""
@@ -57,20 +54,28 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
             )
         }
 
-        // ── Order Processing ────────────────────────────────────────
+        // ── Order Processing ─────────────────────────────────────────
+        // Route includes remainingWeight and totalSackWeight so the
+        // weighing screen can validate the ordered amount against stock.
         composable(
-            route = "real_time_weighing/{productId}/{productName}/{brand}/{pricePerKilo}",
+            route = "real_time_weighing/{productId}/{productName}/{brand}/{pricePerKilo}/{remainingWeight}/{totalSackWeight}",
             arguments = listOf(
-                navArgument("productId")    { type = NavType.StringType },
-                navArgument("productName")  { type = NavType.StringType },
-                navArgument("brand")        { type = NavType.StringType },
-                navArgument("pricePerKilo") { type = NavType.StringType }
+                navArgument("productId")       { type = NavType.StringType },
+                navArgument("productName")     { type = NavType.StringType },
+                navArgument("brand")           { type = NavType.StringType },
+                navArgument("pricePerKilo")    { type = NavType.StringType },
+                navArgument("remainingWeight") { type = NavType.StringType },
+                navArgument("totalSackWeight") { type = NavType.StringType }
             )
         ) { backStackEntry ->
-            val productId    = backStackEntry.arguments?.getString("productId")    ?: ""
-            val productName  = backStackEntry.arguments?.getString("productName")  ?: ""
-            val brand        = backStackEntry.arguments?.getString("brand")        ?: ""
-            val pricePerKilo = backStackEntry.arguments?.getString("pricePerKilo")
+            val productId       = backStackEntry.arguments?.getString("productId")        ?: ""
+            val productName     = backStackEntry.arguments?.getString("productName")      ?: ""
+            val brand           = backStackEntry.arguments?.getString("brand")            ?: ""
+            val pricePerKilo    = backStackEntry.arguments?.getString("pricePerKilo")
+                ?.toDoubleOrNull() ?: 0.0
+            val remainingWeight = backStackEntry.arguments?.getString("remainingWeight")
+                ?.toDoubleOrNull() ?: 0.0
+            val totalSackWeight = backStackEntry.arguments?.getString("totalSackWeight")
                 ?.toDoubleOrNull() ?: 0.0
             RealTimeWeighingScreen(
                 navController      = navController,
@@ -78,9 +83,11 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
                 productName        = productName,
                 brand              = brand,
                 pricePerKilo       = pricePerKilo,
+                remainingWeight    = remainingWeight,
+                totalSackWeight    = totalSackWeight,
                 orderViewModel     = orderViewModel,
-                deviceViewModel    = deviceViewModel,      // FIX: shared instance
-                inventoryViewModel = inventoryViewModel    // FIX: shared instance
+                deviceViewModel    = deviceViewModel,
+                inventoryViewModel = inventoryViewModel
             )
         }
 
@@ -108,11 +115,11 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
 
         // ── Device / Settings ───────────────────────────────────────
         composable("device_connection") {
-            DeviceConnectionScreen(navController, deviceViewModel)  // FIX: shared instance
+            DeviceConnectionScreen(navController, deviceViewModel)
         }
 
         composable("calibration") {
-            CalibrationScreen(navController, deviceViewModel)        // FIX: shared instance
+            CalibrationScreen(navController, deviceViewModel)
         }
 
         composable("settings") {

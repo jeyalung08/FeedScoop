@@ -34,6 +34,8 @@ fun RealTimeWeighingScreen(
     productName: String,
     brand: String,
     pricePerKilo: Double,
+    remainingWeight: Double  = 0.0,
+    totalSackWeight: Double  = 0.0,
     orderViewModel: OrderViewModel         = hiltViewModel(),
     deviceViewModel: DeviceViewModel       = hiltViewModel(),
     inventoryViewModel: InventoryViewModel = hiltViewModel()
@@ -41,18 +43,23 @@ fun RealTimeWeighingScreen(
     val decodedName  = URLDecoder.decode(productName, StandardCharsets.UTF_8.toString())
     val decodedBrand = URLDecoder.decode(brand,       StandardCharsets.UTF_8.toString())
 
-    var phase           by remember { mutableStateOf("input") }
-    var kilosOrderedStr by remember { mutableStateOf("") }
+    var phase             by remember { mutableStateOf("input") }
+    var kilosOrderedStr   by remember { mutableStateOf("") }
+    var orderSentToDevice by remember { mutableStateOf(false) }
+    var showResetConfirm  by remember { mutableStateOf(false) }
+    var showCancelConfirm by remember { mutableStateOf(false) }
+
+    // Cache last non-zero weight so display doesn't jump to 0 in WAIT_DISPENSE
+    var lastDisplayedWeight by remember { mutableStateOf(0.0) }
 
     val currentWeight    by deviceViewModel.currentWeight.collectAsState()
     val cumulativeWeight by deviceViewModel.cumulativeWeight.collectAsState()
     val deviceStatus     by deviceViewModel.deviceStatus.collectAsState()
     val isConnected      by deviceViewModel.isConnected.collectAsState()
 
-    // Cache last non-zero weight so display doesn't jump to 0 in WAIT_DISPENSE
-    var lastDisplayedWeight by remember { mutableStateOf(0.0) }
     LaunchedEffect(currentWeight, deviceStatus) {
-        if (deviceStatus == "MEASURING" || deviceStatus == "OVERWEIGHT" || deviceStatus == "EXACT") {
+        if (deviceStatus == "MEASURING" || deviceStatus == "OVERWEIGHT"
+            || deviceStatus == "EXACT") {
             lastDisplayedWeight = currentWeight
         }
     }
@@ -61,17 +68,27 @@ fun RealTimeWeighingScreen(
     val remaining     = (kilosOrdered - cumulativeWeight).coerceAtLeast(0.0)
     val targetReached = kilosOrdered > 0.0 && cumulativeWeight >= kilosOrdered
 
-    // Status color
-    val indicatorColor: Color = when {
-        deviceStatus == "OVERWEIGHT"                               -> Color(0xFFF57C00)
-        deviceStatus == "EXACT" || deviceStatus == "WAIT_DISPENSE" -> Color(0xFF4CAF50)
-        deviceStatus == "COMPLETE"                                 -> Color(0xFF2E7D32)
-        targetReached                                              -> Color(0xFF4CAF50)
-        deviceStatus == "MEASURING"                                -> Color(0xFFE53935)
-        else                                                       -> Color.LightGray
+    // ── Input validation ─────────────────────────────────────────────
+    val inputError: String? = when {
+        kilosOrderedStr.isNotBlank() && kilosOrdered <= 0.0 ->
+            "Enter a valid weight greater than 0"
+        remainingWeight > 0.0 && kilosOrdered > remainingWeight ->
+            "Exceeds remaining stock (${String.format("%.3f", remainingWeight)} kg available)"
+        totalSackWeight > 0.0 && kilosOrdered > totalSackWeight ->
+            "Exceeds sack weight (${String.format("%.3f", totalSackWeight)} kg max)"
+        else -> null
     }
+    val canStart = kilosOrdered > 0.0 && inputError == null && isConnected
 
-    // Status label
+    // ── Status colors and labels ─────────────────────────────────────
+    val indicatorColor: Color = when {
+        deviceStatus == "OVERWEIGHT"                                -> Color(0xFFF57C00)
+        deviceStatus == "EXACT" || deviceStatus == "WAIT_DISPENSE" -> Color(0xFF4CAF50)
+        deviceStatus == "COMPLETE"                                  -> Color(0xFF2E7D32)
+        targetReached                                               -> Color(0xFF4CAF50)
+        deviceStatus == "MEASURING"                                 -> Color(0xFFE53935)
+        else                                                        -> Color.LightGray
+    }
     val indicatorLabel: String = when {
         deviceStatus == "OVERWEIGHT"    -> "Overweight — remove some feed"
         deviceStatus == "WAIT_DISPENSE" -> "Weight locked — tap Accept or Proceed"
@@ -83,7 +100,15 @@ fun RealTimeWeighingScreen(
         else                            -> "—"
     }
 
-    // Auto-navigate when firmware reports COMPLETE
+    // ── Device reboot detection ──────────────────────────────────────
+    LaunchedEffect(deviceStatus) {
+        if (phase == "scooping" && orderSentToDevice &&
+            deviceStatus == "IDLE" && isConnected) {
+            deviceViewModel.startOrder(kilosOrdered)
+        }
+    }
+
+    // ── Auto-navigate when firmware reports COMPLETE ─────────────────
     LaunchedEffect(deviceStatus) {
         if (phase == "scooping" && deviceStatus == "COMPLETE" && cumulativeWeight > 0.0) {
             val order = Order(
@@ -97,6 +122,56 @@ fun RealTimeWeighingScreen(
             orderViewModel.addOrder(order, inventoryViewModel)
             navController.navigate("order_result_popup")
         }
+    }
+
+    // ── Reset cumulative confirmation dialog ─────────────────────────
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("Reset Cumulative Weight?") },
+            text  = {
+                Text(
+                    "This will zero the cumulative total " +
+                            "(${String.format("%.3f", cumulativeWeight)} kg) " +
+                            "and tare the scale.\n\n" +
+                            "Target (${String.format("%.3f", kilosOrdered)} kg) stays the same."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showResetConfirm = false
+                    deviceViewModel.resetCumulative(kilosOrdered)
+                }) { Text("Reset", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // ── Cancel order confirmation dialog ─────────────────────────────
+    if (showCancelConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCancelConfirm = false },
+            title = { Text("Cancel Order?") },
+            text  = {
+                Text(
+                    "This will cancel the entire order and return the device to idle. " +
+                            "No weight will be recorded."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCancelConfirm = false
+                    deviceViewModel.resetOrder()
+                    orderSentToDevice = false
+                    phase = "input"
+                }) { Text("Cancel Order", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelConfirm = false }) { Text("Keep Going") }
+            }
+        )
     }
 
     Scaffold(
@@ -120,12 +195,12 @@ fun RealTimeWeighingScreen(
                 .padding(padding)
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            // Device online dot
+            // Device badge
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Box(
@@ -147,6 +222,35 @@ fun RealTimeWeighingScreen(
                 "Brand: $decodedBrand  |  ₱$pricePerKilo / kg",
                 style = MaterialTheme.typography.bodyMedium
             )
+
+            // Stock info bar
+            if (remainingWeight > 0.0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors   = CardDefaults.cardColors(
+                        containerColor = if (remainingWeight / totalSackWeight <= 0.10)
+                            Color(0xFFFFEBEE) else Color(0xFFE8F5E9)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Available stock:", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "${String.format("%.3f", remainingWeight)} kg" +
+                                    " / ${String.format("%.3f", totalSackWeight)} kg",
+                            style      = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color      = if (remainingWeight / totalSackWeight <= 0.10)
+                                Color.Red else Color(0xFF2E7D32)
+                        )
+                    }
+                }
+            }
+
             HorizontalDivider()
 
             // ════════════════════════════════════════════════════════
@@ -159,23 +263,26 @@ fun RealTimeWeighingScreen(
                 )
 
                 OutlinedTextField(
-                    value = kilosOrderedStr,
+                    value         = kilosOrderedStr,
                     onValueChange = { input ->
                         val filtered = input.filter { it.isDigit() || it == '.' }
                         if (filtered.count { it == '.' } <= 1) kilosOrderedStr = filtered
                     },
-                    label   = { Text("Kilos Ordered") },
-                    suffix  = { Text("kg") },
+                    label    = { Text("Kilos Ordered") },
+                    suffix   = { Text("kg") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    isError = kilosOrderedStr.isNotBlank() && kilosOrdered <= 0.0,
-                    modifier = Modifier.fillMaxWidth()
+                    isError  = inputError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        if (inputError != null)
+                            Text(inputError, color = MaterialTheme.colorScheme.error)
+                        else if (remainingWeight > 0.0)
+                            Text("Max: ${String.format("%.3f", remainingWeight)} kg",
+                                color = Color.Gray)
+                    }
                 )
 
-                if (kilosOrderedStr.isNotBlank() && kilosOrdered <= 0.0)
-                    Text("Enter a valid weight greater than 0",
-                        color = Color.Red, style = MaterialTheme.typography.bodySmall)
-
-                if (kilosOrdered > 0.0)
+                if (kilosOrdered > 0.0 && inputError == null)
                     Text(
                         "Estimated total: ₱${String.format("%.2f", kilosOrdered * pricePerKilo)}",
                         style = MaterialTheme.typography.bodySmall, color = Color.Gray
@@ -183,16 +290,17 @@ fun RealTimeWeighingScreen(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
-                        onClick = {
-                            if (kilosOrdered > 0.0) {
-                                deviceViewModel.startOrder(kilosOrdered)
-                                lastDisplayedWeight = 0.0
-                                phase = "scooping"
-                            }
+                        onClick  = {
+                            deviceViewModel.startOrder(kilosOrdered)
+                            lastDisplayedWeight = 0.0
+                            orderSentToDevice   = true
+                            phase = "scooping"
                         },
-                        enabled  = kilosOrdered > 0.0 && isConnected,
+                        enabled  = canStart,
                         modifier = Modifier.weight(1f),
-                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2E7D32)
+                        )
                     ) { Text("Start Scooping", color = Color.White) }
 
                     OutlinedButton(
@@ -202,8 +310,10 @@ fun RealTimeWeighingScreen(
                 }
 
                 if (!isConnected)
-                    Text("⚠ Device is offline. Go to Device Connection to check status.",
-                        color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "⚠ Device is offline. Go to Device Connection to check status.",
+                        color = Color.Red, style = MaterialTheme.typography.bodySmall
+                    )
             }
 
             // ════════════════════════════════════════════════════════
@@ -211,10 +321,30 @@ fun RealTimeWeighingScreen(
             // ════════════════════════════════════════════════════════
             if (phase == "scooping") {
 
+                // Reboot banner
+                if (deviceStatus == "IDLE" && isConnected && orderSentToDevice) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors   = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("⚠ Device restarted", style = MaterialTheme.typography.titleSmall,
+                                color = Color(0xFFE65100), fontWeight = FontWeight.Bold)
+                            Text("Resending order automatically...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFE65100))
+                        }
+                    }
+                }
+
                 // Target + progress
                 Text(
                     "Target: ${String.format("%.3f", kilosOrdered)} kg",
-                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
                 )
 
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -242,7 +372,7 @@ fun RealTimeWeighingScreen(
                     )
                 }
 
-                // Current scoop weight — shows cached value in WAIT_DISPENSE
+                // Live weight card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors   = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
@@ -257,8 +387,9 @@ fun RealTimeWeighingScreen(
                                 else ->
                                     "${String.format("%.3f", currentWeight)} kg"
                             },
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold
+                            style      = MaterialTheme.typography.headlineMedium,
+                            color      = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
                             text  = if (deviceStatus == "WAIT_DISPENSE") "Weight locked"
@@ -268,7 +399,7 @@ fun RealTimeWeighingScreen(
                     }
                 }
 
-                // Status indicator box
+                // Status box
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -280,80 +411,58 @@ fun RealTimeWeighingScreen(
                         fontWeight = FontWeight.SemiBold, color = indicatorColor)
                 }
 
-                // ── Accept + Tare ─────────────────────────────────────
-                // Accept: adds current scoop to cumulative.
-                //   - Available in MEASURING when currentWeight > 0
-                //   - Available in WAIT_DISPENSE (exact weight auto-detected)
-                //
-                // Tare: zeroes the scale.
-                //   - Only available in MEASURING (not locked in WAIT_DISPENSE)
-                //   - Use after Accept to zero scale for next scoop
-                //
-                // Accept: adds current scoop to cumulative.
-                //   - MEASURING:     enabled when currentWeight > 0
-                //   - WAIT_DISPENSE: enabled (exact weight was auto-detected)
+                HorizontalDivider()
+
+                // ── BUTTON 1: ACCEPT ──────────────────────────────────
+                // Sends orderComplete=true → ESP32 reads current weight,
+                // adds to totalWeight, tares scale for next scoop
                 val acceptEnabled = isConnected && (
                         (deviceStatus == "MEASURING" && currentWeight > 0.0) ||
-                                (deviceStatus == "WAIT_DISPENSE")
-                        )
-
-                // Tare: zeroes the scale — enabled during ANY active order state.
-                // User can tare freely between scoops, after overweight,
-                // or whenever needed throughout a multi-scoop order.
-                // Only disabled when IDLE or COMPLETE (no active order).
-                val tareEnabled = isConnected && (
-                        deviceStatus == "MEASURING"     ||
                                 deviceStatus == "WAIT_DISPENSE" ||
-                                deviceStatus == "OVERWEIGHT"    ||
                                 deviceStatus == "EXACT"
                         )
-
-                Row(
+                Button(
+                    onClick  = { deviceViewModel.acceptMeasurement() },
+                    enabled  = acceptEnabled,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
                 ) {
-                    Button(
-                        onClick  = { deviceViewModel.acceptMeasurement() },
-                        enabled  = acceptEnabled,
-                        modifier = Modifier.weight(1f),
-                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
-                    ) {
-                        Text("Accept", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-
-                    OutlinedButton(
-                        onClick  = { deviceViewModel.tareScale() },
-                        enabled  = tareEnabled,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Tare", fontWeight = FontWeight.Bold)
-                    }
+                    Text("✔  Accept Measurement", color = Color.White, fontWeight = FontWeight.Bold)
                 }
+                Text(
+                    "Adds current scoop weight to cumulative total and tares the scale.",
+                    style = MaterialTheme.typography.bodySmall, color = Color.Gray
+                )
 
-                Row(
+                // ── BUTTON 2: TARE ────────────────────────────────────
+                // Sends tare=true to /device/calibration
+                // ESP32 zeroes the scale WITHOUT adding to cumulative
+                val tareEnabled = isConnected && (
+                        deviceStatus == "MEASURING"    ||
+                                deviceStatus == "WAIT_DISPENSE"||
+                                deviceStatus == "OVERWEIGHT"   ||
+                                deviceStatus == "EXACT"
+                        )
+                Button(
+                    onClick  = { deviceViewModel.tareScale() },
+                    enabled  = tareEnabled,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF546E7A))
                 ) {
-                    Text("Add scoop to total",
-                        style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-                        modifier = Modifier.weight(1f))
-                    Text("Reset scale to 0",
-                        style = MaterialTheme.typography.bodySmall, color = Color.Gray,
-                        modifier = Modifier.weight(1f))
+                    Text("⊖  Tare Scale (Zero Only)", color = Color.White, fontWeight = FontWeight.Bold)
                 }
+                Text(
+                    "Zeros the scale without adding to the cumulative weight.",
+                    style = MaterialTheme.typography.bodySmall, color = Color.Gray
+                )
 
-                // ── PROCEED button ─────────────────────────────────────
-                // Appears when target is reached or device is in WAIT_DISPENSE/EXACT.
-                // Saves the order and navigates to result screen.
-                // Calls resetOrder() which writes orderCancelled=true so the
-                // firmware stops beeping and returns to IDLE cleanly.
-                if (deviceStatus == "WAIT_DISPENSE"
-                    || deviceStatus == "EXACT"
-                    || targetReached
-                ) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                // ── BUTTON 3: PROCEED TO CHECKOUT ─────────────────────
+                // Saves the order with current cumulative weight.
+                // Writes orderCancelled=true so ESP32 returns to IDLE cleanly.
+                if (deviceStatus == "WAIT_DISPENSE" || deviceStatus == "EXACT"
+                    || targetReached) {
                     Button(
-                        onClick = {
+                        onClick  = {
                             val order = Order(
                                 productId    = productId,
                                 productName  = decodedName,
@@ -363,7 +472,7 @@ fun RealTimeWeighingScreen(
                                 totalPrice   = cumulativeWeight * pricePerKilo
                             )
                             orderViewModel.addOrder(order, inventoryViewModel)
-                            deviceViewModel.resetOrder()   // writes orderCancelled=true
+                            deviceViewModel.resetOrder()
                             navController.navigate("order_result_popup")
                         },
                         enabled  = isConnected && cumulativeWeight > 0.0,
@@ -371,7 +480,7 @@ fun RealTimeWeighingScreen(
                         colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Proceed with Order",
+                            Text("🛒  Proceed to Checkout",
                                 color = Color.White, fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.bodyLarge)
                             Text(
@@ -383,15 +492,25 @@ fun RealTimeWeighingScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
+                // ── BUTTON 4: RESET CUMULATIVE ────────────────────────
+                // Sends resetCumulative=true → ESP32 zeroes totalWeight + tares
+                // Order stays active with same target weight
                 OutlinedButton(
-                    onClick  = {
-                        deviceViewModel.resetOrder()   // writes orderCancelled=true
-                        phase = "input"
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Cancel Order") }
+                    onClick  = { showResetConfirm = true },
+                    enabled  = deviceStatus != "WAIT_DISPENSE" && deviceStatus != "EXACT",
+                    modifier = Modifier.fillMaxWidth(),
+                    colors   = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFFE65100)
+                    )
+                ) { Text("↺  Reset Cumulative Weight") }
+
+                // ── BUTTON 5: CANCEL ORDER ────────────────────────────
+                // Sends orderCancelled=true → ESP32 resets to IDLE
+                OutlinedButton(
+                    onClick  = { showCancelConfirm = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                ) { Text("✕  Cancel Order") }
             }
         }
     }

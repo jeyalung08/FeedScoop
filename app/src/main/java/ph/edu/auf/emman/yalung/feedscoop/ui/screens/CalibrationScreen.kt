@@ -1,6 +1,7 @@
 // FILE: ui/screens/CalibrationScreen.kt
 package ph.edu.auf.emman.yalung.feedscoop.ui.screens
 
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -15,6 +16,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.DeviceViewModel
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalibrationScreen(
@@ -25,6 +27,7 @@ fun CalibrationScreen(
     val isConnected       by deviceViewModel.isConnected.collectAsState()
     val currentWeight     by deviceViewModel.currentWeight.collectAsState()
     val deviceStatus      by deviceViewModel.deviceStatus.collectAsState()
+
 
     Scaffold(
         topBar = {
@@ -46,6 +49,7 @@ fun CalibrationScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+
 
             // ── Device status ───────────────────────────────────────
             Card(
@@ -81,6 +85,7 @@ fun CalibrationScreen(
                 }
             }
 
+
             // ── Calibration status ──────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -106,6 +111,7 @@ fun CalibrationScreen(
                     )
                 }
             }
+
 
             // ── Instructions ────────────────────────────────────────
             Card(
@@ -146,6 +152,7 @@ fun CalibrationScreen(
                 }
             }
 
+
             // ── Tare button ─────────────────────────────────────────
             Button(
                 onClick = { deviceViewModel.startCalibration() },
@@ -156,6 +163,7 @@ fun CalibrationScreen(
                 Text("Tare Scale (Zero)", color = Color.White)
             }
 
+
             if (!isConnected) {
                 Text(
                     "Device must be online to tare. Check Device Connection.",
@@ -163,6 +171,7 @@ fun CalibrationScreen(
                     color = Color.Red
                 )
             }
+
 
             OutlinedButton(
                 onClick = { navController.popBackStack() },

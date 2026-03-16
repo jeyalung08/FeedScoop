@@ -24,11 +24,12 @@ private const val TAG = "DeviceVM"
  * /device/order       — App writes, ESP32 polls every 200ms
  * /device/calibration — App writes tare=true, ESP32 executes + clears
  *
- * /device/order fields:
- *   requiredWeight  — target weight in kg
- *   orderActive     — true while order is in progress
- *   orderComplete   — true = Accept tapped (ESP32 adds to cumulative + clears)
- *   orderCancelled  — true = Proceed or Cancel tapped (ESP32 resets to IDLE + clears)
+ * /device/order fields the firmware reads:
+ *   requiredWeight   — target weight in kg
+ *   orderActive      — true while order is in progress
+ *   orderComplete    — true = Accept tapped (ESP32 adds to cumulative, tares, clears)
+ *   orderCancelled   — true = Proceed or Cancel tapped (ESP32 resets to IDLE, clears)
+ *   resetCumulative  — true = reset cumulative total and tare (ESP32 zeroes + clears)
  */
 @HiltViewModel
 class DeviceViewModel @Inject constructor(
@@ -64,22 +65,20 @@ class DeviceViewModel @Inject constructor(
 
     // ─────────────────────────────────────────────────────────────────
     // Real-time listener on /device/live
+    // ESP32 pushes here every 300ms via writeLiveData()
     // ─────────────────────────────────────────────────────────────────
     private fun startListeningToDevice() {
         Log.d(TAG, "Attaching listener to /device/live")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (!snapshot.exists()) { _isConnected.value = false; return }
-
                 val current = snapshot.child("currentWeight").getValue(Double::class.java) ?: 0.0
                 val total   = snapshot.child("totalWeight").getValue(Double::class.java)   ?: 0.0
                 val status  = snapshot.child("status").getValue(String::class.java)        ?: "IDLE"
-
                 _currentWeight.value    = current
                 _cumulativeWeight.value = total
                 _deviceStatus.value     = status
                 _isConnected.value      = true
-
                 Log.d(TAG, "live: current=$current total=$total status=$status")
             }
             override fun onCancelled(error: DatabaseError) {
@@ -94,6 +93,7 @@ class DeviceViewModel @Inject constructor(
     // ─────────────────────────────────────────────────────────────────
     // START ORDER
     // Writes requiredWeight + orderActive=true + clears all flags
+    // ESP32 picks this up within ~200ms and calls startOrder()
     // ─────────────────────────────────────────────────────────────────
     fun startOrder(requiredWeightKg: Double) {
         Log.d(TAG, "startOrder: requiredWeight=$requiredWeightKg")
@@ -101,7 +101,8 @@ class DeviceViewModel @Inject constructor(
             "requiredWeight"  to requiredWeightKg,
             "orderActive"     to true,
             "orderComplete"   to false,
-            "orderCancelled"  to false
+            "orderCancelled"  to false,
+            "resetCumulative" to false
         )
         orderRef.setValue(map) { error, _ ->
             if (error != null) Log.e(TAG, "startOrder FAILED: ${error.message}")
@@ -111,8 +112,8 @@ class DeviceViewModel @Inject constructor(
 
     // ─────────────────────────────────────────────────────────────────
     // ACCEPT MEASUREMENT
-    // Writes orderComplete=true — ESP32 adds current weight to
-    // cumulative and stays in MEASURING (or goes to COMPLETE if done)
+    // Writes orderComplete=true
+    // ESP32 reads current scale weight, adds to totalWeight, tares, clears flag
     // ─────────────────────────────────────────────────────────────────
     fun acceptMeasurement() {
         Log.d(TAG, "acceptMeasurement: writing orderComplete=true")
@@ -125,7 +126,7 @@ class DeviceViewModel @Inject constructor(
     // ─────────────────────────────────────────────────────────────────
     // TARE SCALE
     // Writes tare=true to /device/calibration
-    // ESP32 calls tareNoDelay() and clears the flag
+    // ESP32 calls tareNoDelay() + resetSmoothBuffer() and clears flag
     // ─────────────────────────────────────────────────────────────────
     fun tareScale() {
         Log.d(TAG, "tareScale: sending tare command")
@@ -136,25 +137,45 @@ class DeviceViewModel @Inject constructor(
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // RESET ORDER (Proceed / Cancel)
-    // FIX: Now writes orderCancelled=true instead of orderActive=false.
-    // This is an explicit, unambiguous signal that can never be
-    // accidentally triggered by a stale orderActive value.
-    // ESP32 reads orderCancelled=true → calls resetToIdle() → buzzer
-    // stops, LEDs off, state=IDLE, ready for next order.
+    // RESET CUMULATIVE WEIGHT
+    // Writes resetCumulative=true — ESP32 zeroes totalWeight and tares
+    // Order stays active with same target weight
+    // ─────────────────────────────────────────────────────────────────
+    fun resetCumulative(requiredWeightKg: Double) {
+        Log.d(TAG, "resetCumulative: requiredWeight=$requiredWeightKg")
+        val map = mapOf(
+            "requiredWeight"  to requiredWeightKg,
+            "orderActive"     to true,
+            "orderComplete"   to false,
+            "orderCancelled"  to false,
+            "resetCumulative" to true
+        )
+        orderRef.setValue(map) { error, _ ->
+            if (error != null) Log.e(TAG, "resetCumulative FAILED: ${error.message}")
+            else Log.d(TAG, "resetCumulative written")
+        }
+        // Reset local immediately so UI updates without waiting for Firebase
+        _cumulativeWeight.value = 0.0
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RESET ORDER (Proceed to checkout / Cancel order)
+    // Writes orderCancelled=true — explicit, unambiguous cancel signal
+    // ESP32 reads it → stops buzzer → LEDs off → resets to IDLE
     // ─────────────────────────────────────────────────────────────────
     fun resetOrder() {
         Log.d(TAG, "resetOrder: writing orderCancelled=true")
         val map = mapOf(
-            "orderActive"    to false,
-            "orderComplete"  to false,
-            "orderCancelled" to true
+            "orderActive"     to false,
+            "orderComplete"   to false,
+            "orderCancelled"  to true,
+            "resetCumulative" to false
         )
         orderRef.setValue(map) { error, _ ->
             if (error != null) Log.e(TAG, "resetOrder FAILED: ${error.message}")
             else Log.d(TAG, "orderCancelled written")
         }
-        // Reset local state immediately so UI updates without waiting
+        // Reset local state immediately
         _currentWeight.value    = 0.0
         _cumulativeWeight.value = 0.0
         _deviceStatus.value     = "IDLE"
@@ -162,6 +183,7 @@ class DeviceViewModel @Inject constructor(
 
     // ─────────────────────────────────────────────────────────────────
     // CALIBRATION (CalibrationScreen tare button)
+    // Same as tareScale() but also updates calibrationStatus in UI
     // ─────────────────────────────────────────────────────────────────
     fun startCalibration() {
         _calibrationStatus.value = "Sending tare command..."
@@ -172,7 +194,7 @@ class DeviceViewModel @Inject constructor(
         }
     }
 
-    // Legacy alias
+    // Legacy alias — keeps existing callers compiling
     fun resetWeight() = resetOrder()
 
     override fun onCleared() {
