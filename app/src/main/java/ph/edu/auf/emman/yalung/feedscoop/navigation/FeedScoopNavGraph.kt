@@ -96,7 +96,8 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
         }
 
         composable("order_summary") {
-            OrderSummaryScreen(navController, orderViewModel)
+            // Pass deviceViewModel so Finish button can reset device to IDLE
+            OrderSummaryScreen(navController, orderViewModel, deviceViewModel)
         }
 
         // ── Inventory ───────────────────────────────────────────────

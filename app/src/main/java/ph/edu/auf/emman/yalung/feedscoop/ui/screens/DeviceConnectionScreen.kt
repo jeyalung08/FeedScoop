@@ -21,10 +21,8 @@ fun DeviceConnectionScreen(
     navController: NavController,
     deviceViewModel: DeviceViewModel = hiltViewModel()
 ) {
-    val isConnected     by deviceViewModel.isConnected.collectAsState()
-    val deviceStatus    by deviceViewModel.deviceStatus.collectAsState()
-    val currentWeight   by deviceViewModel.currentWeight.collectAsState()
-    val cumulativeWeight by deviceViewModel.cumulativeWeight.collectAsState()
+    val isConnected  by deviceViewModel.isConnected.collectAsState()
+    val deviceStatus by deviceViewModel.deviceStatus.collectAsState()
 
     val statusColor = when {
         isConnected && deviceStatus != "IDLE" -> Color(0xFF2E7D32)
@@ -32,9 +30,10 @@ fun DeviceConnectionScreen(
         else                                  -> Color(0xFFC62828)
     }
     val statusLabel = when {
-        !isConnected         -> "Offline — No data from device"
+        !isConnected                     -> "Offline — No data from device"
         deviceStatus == "IDLE"           -> "Online — Device idle"
         deviceStatus == "MEASURING"      -> "Online — Measuring"
+        deviceStatus == "WAIT_TARE"      -> "Online — Waiting for tare"
         deviceStatus == "WAIT_DISPENSE"  -> "Online — Waiting for confirmation"
         deviceStatus == "COMPLETE"       -> "Online — Order complete"
         deviceStatus == "OVERWEIGHT"     -> "Online — Overweight!"
@@ -65,7 +64,7 @@ fun DeviceConnectionScreen(
             // ── Connection status card ──────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
+                colors   = CardDefaults.cardColors(
                     containerColor = if (isConnected) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
                 )
             ) {
@@ -77,13 +76,13 @@ fun DeviceConnectionScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = if (isConnected) "● Connected" else "● Disconnected",
-                        style = MaterialTheme.typography.titleLarge,
+                        text       = if (isConnected) "● Connected" else "● Disconnected",
+                        style      = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = statusColor
+                        color      = statusColor
                     )
                     Text(
-                        text = statusLabel,
+                        text  = statusLabel,
                         style = MaterialTheme.typography.bodyMedium,
                         color = statusColor
                     )
@@ -93,7 +92,7 @@ fun DeviceConnectionScreen(
             // ── Architecture info ───────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+                colors   = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -118,68 +117,18 @@ fun DeviceConnectionScreen(
                 }
             }
 
-            // ── Live data preview (only when connected) ─────────────
+            // ── Calibration shortcut (only when connected) ──────────
             if (isConnected) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            "Live Data",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = Color(0xFF2E7D32)
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Current scoop:", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${String.format("%.3f", currentWeight)} kg",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Cumulative:", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${String.format("%.3f", cumulativeWeight)} kg",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Device status:", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                deviceStatus,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF2E7D32)
-                            )
-                        }
-                    }
-                }
-
                 Button(
                     onClick = { navController.navigate("calibration") },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
                 ) { Text("Go to Calibration", color = Color.White) }
             } else {
-                // Not connected — show troubleshooting guide
+                // Troubleshooting guide
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+                    colors   = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -190,10 +139,14 @@ fun DeviceConnectionScreen(
                             style = MaterialTheme.typography.titleSmall,
                             color = Color(0xFFF57C00)
                         )
-                        Text("1. Make sure the ESP32 is powered on", style = MaterialTheme.typography.bodySmall)
-                        Text("2. Check that the ESP32 is connected to WiFi", style = MaterialTheme.typography.bodySmall)
-                        Text("3. Verify WiFi credentials in firmware", style = MaterialTheme.typography.bodySmall)
-                        Text("4. Confirm Firebase rules allow read/write", style = MaterialTheme.typography.bodySmall)
+                        Text("1. Make sure the ESP32 is powered on",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("2. Check that the ESP32 is connected to WiFi",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("3. Verify WiFi credentials in firmware",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("4. Confirm Firebase rules allow read/write",
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -206,12 +159,12 @@ private fun ConnectionRow(from: String, description: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top
+        verticalAlignment     = Alignment.Top
     ) {
         Text(
             "→",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color(0xFF2E7D32),
+            style      = MaterialTheme.typography.bodySmall,
+            color      = Color(0xFF2E7D32),
             fontWeight = FontWeight.Bold
         )
         Column {

@@ -58,9 +58,14 @@ fun RealTimeWeighingScreen(
     val isConnected      by deviceViewModel.isConnected.collectAsState()
 
     LaunchedEffect(currentWeight, deviceStatus) {
-        if (deviceStatus == "MEASURING" || deviceStatus == "OVERWEIGHT"
-            || deviceStatus == "EXACT") {
-            lastDisplayedWeight = currentWeight
+        when (deviceStatus) {
+            // Update live display during active measuring states
+            "MEASURING", "OVERWEIGHT", "EXACT" ->
+                lastDisplayedWeight = currentWeight
+            // Clear cached weight when device is idle or order just started
+            // so previous order's value never shows on a new order
+            "IDLE" ->
+                lastDisplayedWeight = 0.0
         }
     }
 
@@ -84,6 +89,7 @@ fun RealTimeWeighingScreen(
     val indicatorColor: Color = when {
         deviceStatus == "OVERWEIGHT"                                -> Color(0xFFF57C00)
         deviceStatus == "EXACT" || deviceStatus == "WAIT_DISPENSE" -> Color(0xFF4CAF50)
+        deviceStatus == "WAIT_TARE"                                 -> Color(0xFF1565C0)
         deviceStatus == "COMPLETE"                                  -> Color(0xFF2E7D32)
         targetReached                                               -> Color(0xFF4CAF50)
         deviceStatus == "MEASURING"                                 -> Color(0xFFE53935)
@@ -92,6 +98,7 @@ fun RealTimeWeighingScreen(
     val indicatorLabel: String = when {
         deviceStatus == "OVERWEIGHT"    -> "Overweight — remove some feed"
         deviceStatus == "WAIT_DISPENSE" -> "Weight locked — tap Accept or Proceed"
+        deviceStatus == "WAIT_TARE"     -> "Scoop accepted — tap Tare to continue"
         deviceStatus == "EXACT"         -> "Exact weight — tap Accept or Proceed"
         deviceStatus == "COMPLETE"      -> "Order complete!"
         targetReached                   -> "Target reached — tap Proceed to finish"
@@ -109,6 +116,10 @@ fun RealTimeWeighingScreen(
     }
 
     // ── Auto-navigate when firmware reports COMPLETE ─────────────────
+    // Do NOT call deviceViewModel.resetOrder() here — the firmware
+    // handles its own reset to IDLE after COMPLETE automatically.
+    // Calling resetOrder() would write orderCancelled=true and race
+    // with the firmware's own resetToIdle(), causing a double-reset.
     LaunchedEffect(deviceStatus) {
         if (phase == "scooping" && deviceStatus == "COMPLETE" && cumulativeWeight > 0.0) {
             val order = Order(
@@ -120,7 +131,24 @@ fun RealTimeWeighingScreen(
                 totalPrice   = cumulativeWeight * pricePerKilo
             )
             orderViewModel.addOrder(order, inventoryViewModel)
+            // Reset all local screen state so next order starts clean
+            phase               = "input"
+            kilosOrderedStr     = ""
+            lastDisplayedWeight = 0.0
+            orderSentToDevice   = false
+            // Firmware self-resets to IDLE — no resetOrder() needed
             navController.navigate("order_result_popup")
+        }
+    }
+
+    // ── Also reset screen state when device returns to IDLE mid-order ─
+    // Handles the case where firmware resets (power cycle, cancel from
+    // device side) while app is in scooping phase
+    LaunchedEffect(deviceStatus) {
+        if (phase == "scooping" && deviceStatus == "IDLE" && !orderSentToDevice) {
+            phase               = "input"
+            kilosOrderedStr     = ""
+            lastDisplayedWeight = 0.0
         }
     }
 
@@ -164,7 +192,8 @@ fun RealTimeWeighingScreen(
                 TextButton(onClick = {
                     showCancelConfirm = false
                     deviceViewModel.resetOrder()
-                    orderSentToDevice = false
+                    orderSentToDevice   = false
+                    lastDisplayedWeight = 0.0
                     phase = "input"
                 }) { Text("Cancel Order", color = Color.Red) }
             },
@@ -416,7 +445,9 @@ fun RealTimeWeighingScreen(
                 // ── BUTTON 1: ACCEPT ──────────────────────────────────
                 // Sends orderComplete=true → ESP32 reads current weight,
                 // adds to totalWeight, tares scale for next scoop
-                val acceptEnabled = isConnected && (
+                // Accept disabled during WAIT_TARE — user must tap Tare first
+                val acceptEnabled = isConnected &&
+                        deviceStatus != "WAIT_TARE" && (
                         (deviceStatus == "MEASURING" && currentWeight > 0.0) ||
                                 deviceStatus == "WAIT_DISPENSE" ||
                                 deviceStatus == "EXACT"
@@ -440,20 +471,34 @@ fun RealTimeWeighingScreen(
                 val tareEnabled = isConnected && (
                         deviceStatus == "MEASURING"    ||
                                 deviceStatus == "WAIT_DISPENSE"||
+                                deviceStatus == "WAIT_TARE"    ||
                                 deviceStatus == "OVERWEIGHT"   ||
                                 deviceStatus == "EXACT"
                         )
+                // Tare button is highlighted green when WAIT_TARE to guide the user
+                val tareIsRequired = deviceStatus == "WAIT_TARE"
                 Button(
                     onClick  = { deviceViewModel.tareScale() },
                     enabled  = tareEnabled,
                     modifier = Modifier.fillMaxWidth(),
-                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF546E7A))
+                    colors   = ButtonDefaults.buttonColors(
+                        containerColor = if (tareIsRequired) Color(0xFF2E7D32)
+                        else Color(0xFF546E7A)
+                    )
                 ) {
-                    Text("⊖  Tare Scale (Zero Only)", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (tareIsRequired) "⊖  Tare Scale to Continue"
+                        else "⊖  Tare Scale (Zero Only)",
+                        color = Color.White, fontWeight = FontWeight.Bold
+                    )
                 }
                 Text(
-                    "Zeros the scale without adding to the cumulative weight.",
-                    style = MaterialTheme.typography.bodySmall, color = Color.Gray
+                    if (tareIsRequired)
+                        "Tap Tare to zero the scale before the next scoop."
+                    else
+                        "Zeros the scale without adding to the cumulative weight.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (tareIsRequired) Color(0xFF2E7D32) else Color.Gray
                 )
 
                 // ── BUTTON 3: PROCEED TO CHECKOUT ─────────────────────

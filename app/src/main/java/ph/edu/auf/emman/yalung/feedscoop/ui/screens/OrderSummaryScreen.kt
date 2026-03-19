@@ -1,4 +1,4 @@
-// File: ui/screens/OrderSummaryScreen.kt
+// FILE: ui/screens/OrderSummaryScreen.kt
 package ph.edu.auf.emman.yalung.feedscoop.ui.screens
 
 import androidx.compose.foundation.layout.*
@@ -14,15 +14,18 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import ph.edu.auf.emman.yalung.feedscoop.data.model.Order
+import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.DeviceViewModel
 import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.OrderViewModel
 
 @Composable
 fun OrderSummaryScreen(
     navController: NavController,
-    orderViewModel: OrderViewModel = hiltViewModel()
+    orderViewModel: OrderViewModel = hiltViewModel(),
+    // FIX: DeviceViewModel needed to reset device to IDLE on finish
+    deviceViewModel: DeviceViewModel = hiltViewModel()
 ) {
-    val allOrders   = orderViewModel.currentOrders.collectAsState().value
-    val totalPrice  = allOrders.sumOf { it.totalPrice }
+    val allOrders  = orderViewModel.currentOrders.collectAsState().value
+    val totalPrice = allOrders.sumOf { it.totalPrice }
 
     Column(
         modifier = Modifier
@@ -30,7 +33,7 @@ fun OrderSummaryScreen(
             .padding(16.dp)
     ) {
         Text(
-            text = "Order Summary",
+            text  = "Order Summary",
             style = MaterialTheme.typography.titleLarge,
             color = Color(0xFF2E7D32)
         )
@@ -50,16 +53,16 @@ fun OrderSummaryScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+            colors   = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = "Grand Total: ₱${String.format("%.2f", totalPrice)}",
+                    text  = "Grand Total: ₱${String.format("%.2f", totalPrice)}",
                     style = MaterialTheme.typography.titleMedium,
                     color = Color(0xFF1B5E20)
                 )
                 Text(
-                    text = "${allOrders.size} sack order(s)",
+                    text  = "${allOrders.size} sack order(s)",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -69,15 +72,21 @@ fun OrderSummaryScreen(
 
         Button(
             onClick = {
+                // FIX: Tell device to return to IDLE before navigating away.
+                // Without this, the device stays in whatever state the last
+                // order left it in (COMPLETE, WAIT_TARE, etc.) and the next
+                // order start sees stale Firebase state.
+                deviceViewModel.resetOrder()
+
                 orderViewModel.clearCurrentOrders()
                 navController.navigate("dashboard") {
                     popUpTo("dashboard") { inclusive = true }
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+            colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
         ) {
-            Text(text = "Finish and Return to Dashboard", color = Color.White)
+            Text("Finish and Return to Dashboard", color = Color.White)
         }
     }
 }
@@ -86,18 +95,18 @@ fun OrderSummaryScreen(
 fun SummaryOrderRow(order: Order) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFC8E6C9))
+        shape    = RoundedCornerShape(12.dp),
+        colors   = CardDefaults.cardColors(containerColor = Color(0xFFC8E6C9))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(text = order.productName, style = MaterialTheme.typography.titleSmall)
             Text(text = "Brand: ${order.brand}", style = MaterialTheme.typography.bodySmall)
             Text(
-                text = "${String.format("%.3f", order.kilosOrdered)} kg  ×  ₱${order.pricePerKilo}/kg",
+                text  = "${String.format("%.3f", order.kilosOrdered)} kg  ×  ₱${order.pricePerKilo}/kg",
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
-                text = "Subtotal: ₱${String.format("%.2f", order.totalPrice)}",
+                text  = "Subtotal: ₱${String.format("%.2f", order.totalPrice)}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFF1B5E20)
             )

@@ -1,7 +1,6 @@
 // FILE: ui/screens/CalibrationScreen.kt
 package ph.edu.auf.emman.yalung.feedscoop.ui.screens
 
-
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -16,7 +15,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.DeviceViewModel
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalibrationScreen(
@@ -25,9 +23,12 @@ fun CalibrationScreen(
 ) {
     val calibrationStatus by deviceViewModel.calibrationStatus.collectAsState()
     val isConnected       by deviceViewModel.isConnected.collectAsState()
-    val currentWeight     by deviceViewModel.currentWeight.collectAsState()
     val deviceStatus      by deviceViewModel.deviceStatus.collectAsState()
 
+    // currentWeight now reflects actual scale reading in ALL states including IDLE
+    // because the firmware was updated to write timerWeight (real reading)
+    // instead of 0.0 during IDLE. This makes the calibration display accurate.
+    val currentWeight by deviceViewModel.currentWeight.collectAsState()
 
     Scaffold(
         topBar = {
@@ -50,11 +51,10 @@ fun CalibrationScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-
-            // ── Device status ───────────────────────────────────────
+            // ── Device online / offline ─────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
+                colors   = CardDefaults.cardColors(
                     containerColor = if (isConnected) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
                 )
             ) {
@@ -62,89 +62,118 @@ fun CalibrationScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = if (isConnected) "Device Online" else "Device Offline",
-                        style = MaterialTheme.typography.titleMedium,
+                        text       = if (isConnected) "Device Online" else "Device Offline",
+                        style      = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (isConnected) Color(0xFF2E7D32) else Color.Red
+                        color      = if (isConnected) Color(0xFF2E7D32) else Color.Red
                     )
                     if (isConnected) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Live weight: ${String.format("%.3f", currentWeight)} kg",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
                         Text(
                             "Status: $deviceStatus",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
+                    } else {
+                        Text(
+                            "Make sure the ESP32 is powered on and connected to WiFi.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFC62828)
+                        )
                     }
                 }
             }
 
-
-            // ── Calibration status ──────────────────────────────────
+            // ── Live scale reading ──────────────────────────────────
+            // This reads from /device/live/currentWeight which the firmware
+            // now updates with the real scale value even when status is IDLE.
+            // This means you can see the actual weight during calibration.
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+                colors   = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "Live Scale Reading",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.Gray
+                    )
+                    Text(
+                        text       = "${String.format("%.3f", currentWeight)} kg",
+                        style      = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        color      = if (isConnected) Color(0xFF2E7D32) else Color.LightGray
+                    )
+                    Text(
+                        text  = if (isConnected) "Updates every ~300ms from device"
+                        else "No data — device offline",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                }
+            }
+
+            // ── Tare status ─────────────────────────────────────────
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors   = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFA))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("Calibration Status", style = MaterialTheme.typography.labelMedium)
+                    Text("Tare Status", style = MaterialTheme.typography.labelMedium)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         calibrationStatus,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = when {
-                            calibrationStatus.contains("Complete") -> Color(0xFF2E7D32)
-                            calibrationStatus.contains("...") || calibrationStatus.contains("ing") -> Color(0xFFF57C00)
-                            calibrationStatus.contains("Failed") -> Color.Red
-                            else -> Color.Gray
+                            calibrationStatus.contains("sent") ||
+                                    calibrationStatus.contains("Complete") -> Color(0xFF2E7D32)
+                            calibrationStatus.contains("Sending")  -> Color(0xFFF57C00)
+                            calibrationStatus.contains("Failed")   -> Color.Red
+                            else                                   -> Color.Gray
                         }
                     )
                 }
             }
 
-
             // ── Instructions ────────────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+                colors   = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        "Before Calibrating",
+                        "How to Tare",
                         style = MaterialTheme.typography.titleSmall,
                         color = Color(0xFFF57C00)
                     )
+                    Text("1. Remove all weight from the scoop.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("2. Watch the Live Scale Reading above stabilize near 0.000.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("3. Tap Tare Scale — reading should return to exactly 0.000.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("4. If it doesn't return to 0.000, tap Tare again.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "1. Remove all weight from the scoop and load cell.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "2. Place the scoop on a flat, stable surface.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "3. Make sure the device is online (green status above).",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "4. Tap 'Tare Scale' — the ESP32 will zero the load cell.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Note: Calibration factor is set in firmware. " +
+                        "Note: Calibration factor is set in firmware (currently 638.23). " +
                                 "Contact your developer to adjust if readings are inaccurate.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.Gray
@@ -152,17 +181,15 @@ fun CalibrationScreen(
                 }
             }
 
-
             // ── Tare button ─────────────────────────────────────────
             Button(
-                onClick = { deviceViewModel.startCalibration() },
+                onClick  = { deviceViewModel.startCalibration() },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = isConnected,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                enabled  = isConnected,
+                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
             ) {
                 Text("Tare Scale (Zero)", color = Color.White)
             }
-
 
             if (!isConnected) {
                 Text(
@@ -172,9 +199,8 @@ fun CalibrationScreen(
                 )
             }
 
-
             OutlinedButton(
-                onClick = { navController.popBackStack() },
+                onClick  = { navController.popBackStack() },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Back") }
         }
