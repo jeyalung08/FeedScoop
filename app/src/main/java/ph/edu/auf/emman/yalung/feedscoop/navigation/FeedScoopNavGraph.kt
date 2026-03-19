@@ -29,8 +29,9 @@ fun FeedScoopNavGraph(navController: NavHostController = rememberNavController()
         }
 
         composable("dashboard") {
-            // Pass inventoryViewModel so dashboard shows restock banners
-            DashboardScreen(navController, inventoryViewModel)
+            // Pass inventoryViewModel for restock banners
+            // Pass deviceViewModel to listen for physical button press
+            DashboardScreen(navController, inventoryViewModel, deviceViewModel)
         }
 
         // ── Products ────────────────────────────────────────────────

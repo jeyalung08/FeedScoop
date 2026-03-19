@@ -57,10 +57,18 @@ class DeviceViewModel @Inject constructor(
     private val liveRef        = database.getReference("device/live")
     private val orderRef       = database.getReference("device/order")
     private val calibrationRef = database.getReference("device/calibration")
-    private var liveListener: ValueEventListener? = null
+    private val buttonRef      = database.getReference("device/button")
+    private var liveListener:   ValueEventListener? = null
+    private var buttonListener: ValueEventListener? = null
+
+    // True when the physical button on the scoop was pressed in IDLE state.
+    // The app reads this to navigate to AvailableProductsScreen.
+    private val _buttonPressed = MutableStateFlow(false)
+    val buttonPressed: StateFlow<Boolean> = _buttonPressed.asStateFlow()
 
     init {
         startListeningToDevice()
+        startListeningToButton()
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -79,6 +87,12 @@ class DeviceViewModel @Inject constructor(
                 _cumulativeWeight.value = total
                 _deviceStatus.value     = status
                 _isConnected.value      = true
+                // Explicitly zero weights when device returns to IDLE
+                // so the app never shows stale measurement from previous order
+                if (status == "IDLE") {
+                    _currentWeight.value    = 0.0
+                    _cumulativeWeight.value = 0.0
+                }
                 Log.d(TAG, "live: current=$current total=$total status=$status")
             }
             override fun onCancelled(error: DatabaseError) {
@@ -88,6 +102,36 @@ class DeviceViewModel @Inject constructor(
         }
         liveRef.addValueEventListener(listener)
         liveListener = listener
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Real-time listener on /device/button
+    // ESP32 writes pressed=true when physical button is pressed in IDLE.
+    // App reads this, navigates to AvailableProductsScreen, then clears it.
+    // ─────────────────────────────────────────────────────────────────
+    private fun startListeningToButton() {
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val pressed = snapshot.child("pressed").getValue(Boolean::class.java) ?: false
+                if (pressed) {
+                    _buttonPressed.value = true
+                    Log.d(TAG, "Physical button pressed — signalling app")
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                Log.e(TAG, "button listener cancelled: ${error.message}")
+            }
+        }
+        buttonRef.addValueEventListener(listener)
+        buttonListener = listener
+    }
+
+    // Call this after navigating to AvailableProductsScreen so the
+    // signal is cleared and the button can be used again next time.
+    fun clearButtonPressed() {
+        _buttonPressed.value = false
+        buttonRef.child("pressed").setValue(false)
+        Log.d(TAG, "buttonPressed cleared")
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -199,6 +243,7 @@ class DeviceViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        liveListener?.let { liveRef.removeEventListener(it) }
+        liveListener?.let   { liveRef.removeEventListener(it) }
+        buttonListener?.let { buttonRef.removeEventListener(it) }
     }
 }

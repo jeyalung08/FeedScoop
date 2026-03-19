@@ -13,16 +13,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.DeviceViewModel
 import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.InventoryViewModel
 
 @Composable
 fun DashboardScreen(
     navController: NavController,
-    inventoryViewModel: InventoryViewModel = hiltViewModel()
+    inventoryViewModel: InventoryViewModel = hiltViewModel(),
+    deviceViewModel: DeviceViewModel       = hiltViewModel()
 ) {
-    val items by inventoryViewModel.inventoryItems.collectAsState()
+    val items         by inventoryViewModel.inventoryItems.collectAsState()
+    val buttonPressed by deviceViewModel.buttonPressed.collectAsState()
+
+    // When the physical button on the scoop is pressed (in IDLE),
+    // navigate directly to AvailableProductsScreen so the user
+    // can select a product and start an order.
+    LaunchedEffect(buttonPressed) {
+        if (buttonPressed) {
+            deviceViewModel.clearButtonPressed()
+            navController.navigate("available_products")
+        }
+    }
 
     val lowStockItems = remember(items) {
         items.filter {
