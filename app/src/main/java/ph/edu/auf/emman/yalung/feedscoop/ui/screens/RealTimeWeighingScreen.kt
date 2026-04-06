@@ -26,6 +26,7 @@ import ph.edu.auf.emman.yalung.feedscoop.ui.viewmodel.OrderViewModel
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RealTimeWeighingScreen(
@@ -59,11 +60,8 @@ fun RealTimeWeighingScreen(
 
     LaunchedEffect(currentWeight, deviceStatus) {
         when (deviceStatus) {
-            // Update live display during active measuring states
             "MEASURING", "OVERWEIGHT", "EXACT" ->
                 lastDisplayedWeight = currentWeight
-            // Clear cached weight when device is idle or order just started
-            // so previous order's value never shows on a new order
             "IDLE" ->
                 lastDisplayedWeight = 0.0
         }
@@ -116,10 +114,6 @@ fun RealTimeWeighingScreen(
     }
 
     // ── Auto-navigate when firmware reports COMPLETE ─────────────────
-    // Do NOT call deviceViewModel.resetOrder() here — the firmware
-    // handles its own reset to IDLE after COMPLETE automatically.
-    // Calling resetOrder() would write orderCancelled=true and race
-    // with the firmware's own resetToIdle(), causing a double-reset.
     LaunchedEffect(deviceStatus) {
         if (phase == "scooping" && deviceStatus == "COMPLETE" && cumulativeWeight > 0.0) {
             val order = Order(
@@ -131,19 +125,15 @@ fun RealTimeWeighingScreen(
                 totalPrice   = cumulativeWeight * pricePerKilo
             )
             orderViewModel.addOrder(order, inventoryViewModel)
-            // Reset all local screen state so next order starts clean
             phase               = "input"
             kilosOrderedStr     = ""
             lastDisplayedWeight = 0.0
             orderSentToDevice   = false
-            // Firmware self-resets to IDLE — no resetOrder() needed
             navController.navigate("order_result_popup")
         }
     }
 
     // ── Also reset screen state when device returns to IDLE mid-order ─
-    // Handles the case where firmware resets (power cycle, cancel from
-    // device side) while app is in scooping phase
     LaunchedEffect(deviceStatus) {
         if (phase == "scooping" && deviceStatus == "IDLE" && !orderSentToDevice) {
             phase               = "input"
@@ -226,26 +216,6 @@ fun RealTimeWeighingScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-
-            // Device badge
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(
-                            if (isConnected) Color(0xFF4CAF50) else Color.Red,
-                            RoundedCornerShape(5.dp)
-                        )
-                )
-                Text(
-                    text  = if (isConnected) "Device online" else "Device offline",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isConnected) Color(0xFF2E7D32) else Color.Red
-                )
-            }
 
             Text(
                 "Brand: $decodedBrand  |  ₱$pricePerKilo / kg",
@@ -443,9 +413,6 @@ fun RealTimeWeighingScreen(
                 HorizontalDivider()
 
                 // ── BUTTON 1: ACCEPT ──────────────────────────────────
-                // Sends orderComplete=true → ESP32 reads current weight,
-                // adds to totalWeight, tares scale for next scoop
-                // Accept disabled during WAIT_TARE — user must tap Tare first
                 val acceptEnabled = isConnected &&
                         deviceStatus != "WAIT_TARE" && (
                         (deviceStatus == "MEASURING" && currentWeight > 0.0) ||
@@ -466,8 +433,6 @@ fun RealTimeWeighingScreen(
                 )
 
                 // ── BUTTON 2: TARE ────────────────────────────────────
-                // Sends tare=true to /device/calibration
-                // ESP32 zeroes the scale WITHOUT adding to cumulative
                 val tareEnabled = isConnected && (
                         deviceStatus == "MEASURING"    ||
                                 deviceStatus == "WAIT_DISPENSE"||
@@ -475,7 +440,6 @@ fun RealTimeWeighingScreen(
                                 deviceStatus == "OVERWEIGHT"   ||
                                 deviceStatus == "EXACT"
                         )
-                // Tare button is highlighted green when WAIT_TARE to guide the user
                 val tareIsRequired = deviceStatus == "WAIT_TARE"
                 Button(
                     onClick  = { deviceViewModel.tareScale() },
@@ -502,8 +466,6 @@ fun RealTimeWeighingScreen(
                 )
 
                 // ── BUTTON 3: PROCEED TO CHECKOUT ─────────────────────
-                // Saves the order with current cumulative weight.
-                // Writes orderCancelled=true so ESP32 returns to IDLE cleanly.
                 if (deviceStatus == "WAIT_DISPENSE" || deviceStatus == "EXACT"
                     || targetReached) {
                     Button(
@@ -538,8 +500,6 @@ fun RealTimeWeighingScreen(
                 }
 
                 // ── BUTTON 4: RESET CUMULATIVE ────────────────────────
-                // Sends resetCumulative=true → ESP32 zeroes totalWeight + tares
-                // Order stays active with same target weight
                 OutlinedButton(
                     onClick  = { showResetConfirm = true },
                     enabled  = deviceStatus != "WAIT_DISPENSE" && deviceStatus != "EXACT",
@@ -550,7 +510,6 @@ fun RealTimeWeighingScreen(
                 ) { Text("↺  Reset Cumulative Weight") }
 
                 // ── BUTTON 5: CANCEL ORDER ────────────────────────────
-                // Sends orderCancelled=true → ESP32 resets to IDLE
                 OutlinedButton(
                     onClick  = { showCancelConfirm = true },
                     modifier = Modifier.fillMaxWidth(),

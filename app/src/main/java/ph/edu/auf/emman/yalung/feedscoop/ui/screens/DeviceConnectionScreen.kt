@@ -24,22 +24,6 @@ fun DeviceConnectionScreen(
     val isConnected  by deviceViewModel.isConnected.collectAsState()
     val deviceStatus by deviceViewModel.deviceStatus.collectAsState()
 
-    val statusColor = when {
-        isConnected && deviceStatus != "IDLE" -> Color(0xFF2E7D32)
-        isConnected                           -> Color(0xFF1565C0)
-        else                                  -> Color(0xFFC62828)
-    }
-    val statusLabel = when {
-        !isConnected                     -> "Offline — No data from device"
-        deviceStatus == "IDLE"           -> "Online — Device idle"
-        deviceStatus == "MEASURING"      -> "Online — Measuring"
-        deviceStatus == "WAIT_TARE"      -> "Online — Waiting for tare"
-        deviceStatus == "WAIT_DISPENSE"  -> "Online — Waiting for confirmation"
-        deviceStatus == "COMPLETE"       -> "Online — Order complete"
-        deviceStatus == "OVERWEIGHT"     -> "Online — Overweight!"
-        else                             -> "Online — $deviceStatus"
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -60,34 +44,6 @@ fun DeviceConnectionScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
-            // ── Connection status card ──────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors   = CardDefaults.cardColors(
-                    containerColor = if (isConnected) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text       = if (isConnected) "● Connected" else "● Disconnected",
-                        style      = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color      = statusColor
-                    )
-                    Text(
-                        text  = statusLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = statusColor
-                    )
-                }
-            }
 
             // ── Architecture info ───────────────────────────────────
             Card(

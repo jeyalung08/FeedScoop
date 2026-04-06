@@ -25,9 +25,6 @@ fun CalibrationScreen(
     val isConnected       by deviceViewModel.isConnected.collectAsState()
     val deviceStatus      by deviceViewModel.deviceStatus.collectAsState()
 
-    // currentWeight now reflects actual scale reading in ALL states including IDLE
-    // because the firmware was updated to write timerWeight (real reading)
-    // instead of 0.0 during IDLE. This makes the calibration display accurate.
     val currentWeight by deviceViewModel.currentWeight.collectAsState()
 
     Scaffold(
@@ -51,46 +48,7 @@ fun CalibrationScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            // ── Device online / offline ─────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors   = CardDefaults.cardColors(
-                    containerColor = if (isConnected) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text       = if (isConnected) "Device Online" else "Device Offline",
-                        style      = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color      = if (isConnected) Color(0xFF2E7D32) else Color.Red
-                    )
-                    if (isConnected) {
-                        Text(
-                            "Status: $deviceStatus",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
-                        )
-                    } else {
-                        Text(
-                            "Make sure the ESP32 is powered on and connected to WiFi.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFC62828)
-                        )
-                    }
-                }
-            }
-
             // ── Live scale reading ──────────────────────────────────
-            // This reads from /device/live/currentWeight which the firmware
-            // now updates with the real scale value even when status is IDLE.
-            // This means you can see the actual weight during calibration.
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors   = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
